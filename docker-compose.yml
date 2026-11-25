@@ -1,0 +1,19 @@
+services:
+  api:
+    build: .                          # build the image from the Dockerfile in this folder
+    volumes:
+      - models:/app/models            # shared: a retrain in one container is visible to all
+      - uploads:/app/data/uploads     # shared: an upload to any container is available for retraining
+    expose:
+      - "8000"                        # reachable by nginx inside Docker, not directly from your laptop
+  nginx:
+    image: nginx:1.27-alpine          # ready-made nginx image
+    ports:
+      - "8080:80"                     # your laptop's port 8080 -> nginx's port 80
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro   # our load-balancer config (read-only)
+    depends_on:
+      - api                           # start the api containers first
+volumes:
+  models:                             # named volumes, managed by Docker
+  uploads:

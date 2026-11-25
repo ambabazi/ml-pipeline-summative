@@ -1,0 +1,8 @@
+.venv/
+.git/
+data/raw/
+data/uploads/
+notebook/
+reports/
+models/*.h5
+**/__pycache__/
