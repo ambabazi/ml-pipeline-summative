@@ -6,10 +6,9 @@ image ML pipeline with offline training, a FastAPI prediction service,
 a Streamlit dashboard, monitoring and versioned retraining.
 
 - GitHub — https://github.com/ambabazi/ml-pipeline-summative
-- API docs — https://neurotrace-api-it4i.onrender.com/docs
-- Local dashboard — http://localhost:8501 after startup
+- API docs — https://neurotrace-api-it4i.onrender.com/docs#/
+- dashboard — (https://ml-pipeline-summative.streamlit.app/)
 - YouTube demo — link pending recording
-- YouTube script and screen cues — [docs/youtube-demo-script.md](docs/youtube-demo-script.md)
 
 ## Run locally
 
