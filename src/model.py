@@ -1,5 +1,7 @@
 """Train, evaluate, version and retrain the NeuroTrace Random Forest."""
+import hashlib
 import json
+from functools import lru_cache
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -40,12 +42,55 @@ def image_table(paths):
 
 
 def training_images():
-    """Base training images (v1 data) + every image uploaded through the API."""
-    roles = pd.read_csv(DATA / "train_roles.csv")                       # which train image is fit/val/new_batch
-    base = [DATA / "train" / f for f in roles[roles.role != "new_batch"].file]  # held-back batch is NOT in the base
-    uploads = [p for label in LABELS for p in (DATA / "uploads" / label).glob("*")
-               if p.suffix.lower() in {".jpg", ".jpeg", ".png"}]      # new data users uploaded
-    return base + uploads, len(uploads)
+    """The original fitting pool, excluding the held-back upload batch."""
+    roles = pd.read_csv(DATA / "train_roles.csv")
+    return [DATA / "train" / filename for filename in roles[roles.role != "new_batch"].file]
+
+
+@lru_cache(maxsize=2)
+def fixed_image_digests(data):
+    """Index the bundled base and evaluation images once per process."""
+    roles = pd.read_csv(data / "train_roles.csv")
+    paths = [data / "train" / filename for filename in roles[roles.role != "new_batch"].file]
+    paths.extend((data / "test").glob("*/*.jpg"))
+    return {hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
+
+
+def active_entry(registry):
+    return next((v for v in registry["versions"] if v["version"] == registry["active"]), None)
+
+
+def used_upload_digests(current):
+    if current is None:
+        return set()
+    if "used_upload_digests" in current:
+        return set(current["used_upload_digests"])
+    if not current["n_uploaded_images"] and not current.get("parent_version"):
+        return set()
+    raise ValueError("The active model has no upload history. Deploy a model with a verified training history.")
+
+
+def upload_batch(current, *, include_content=False):
+    used = used_upload_digests(current)
+    rows = read_uploads(DATA / "uploads", include_content=include_content)
+    stored = {row[0]: row for row in rows}
+    # Older deployments may have saved uploads as files before SQLite was introduced.
+    for label in LABELS:
+        for path in sorted((DATA / "uploads" / label).glob("*")):
+            if not path.is_file() or path.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
+                continue
+            content = path.read_bytes()
+            digest = hashlib.sha256(content).hexdigest()
+            row = (digest, label, path.name)
+            stored.setdefault(digest, (*row, content) if include_content else row)
+    excluded = used | fixed_image_digests(DATA) if stored else used
+    pending = [row for digest, row in stored.items() if digest not in excluded]
+    counts = {"stored": len(stored), "used": len(used & stored.keys()), "pending": len(pending)}
+    return counts, pending
+
+
+def upload_status():
+    return upload_batch(active_entry(load_registry()))[0]
 
 
 def train(df):
@@ -87,28 +132,28 @@ def save_registry(reg):
 
 def run_training(min_auc_drop=0.02):
     """Full pipeline: gather data -> features -> tune -> evaluate -> save new version -> promote if good enough."""
-    MODELS.mkdir(exist_ok=True)
-    paths, n_uploads = training_images()
-    train_df = image_table(paths)
-    test_df = image_table(sorted((DATA / "test").glob("*/*.jpg")))  # same test set every time = fair comparison
+    reg = load_registry()
+    current = active_entry(reg)
+    used = used_upload_digests(current)
+    _, uploaded_rows = upload_batch(current, include_content=True)
+    if current is not None and not uploaded_rows:
+        raise ValueError("No new uploads are pending for the active model.")
 
-    uploaded_rows = read_uploads(DATA / "uploads")
+    MODELS.mkdir(exist_ok=True)
+    train_df = image_table(training_images())
+    test_df = image_table(sorted((DATA / "test").glob("*/*.jpg")))
     if uploaded_rows:
         features = [
             dict(extract_features(content), y=int(label == "parkinson"),
                  person=person_of(Path(label) / filename))
-            for label, filename, content in uploaded_rows
+            for _, label, filename, content in uploaded_rows
         ]
         train_df = pd.concat([train_df, pd.DataFrame(features)], ignore_index=True)
-        n_uploads += len(uploaded_rows)
+    new_digests = {row[0] for row in uploaded_rows}
 
-    reg = load_registry()
-    current = next((v for v in reg["versions"] if v["version"] == reg["active"]), None)
     if current is None:
         model, params = train(train_df)
     else:
-        if not n_uploads:
-            raise ValueError("Upload labelled drawings before retraining.")
         # Preserve the active trees and fit a new block on the expanded training pool.
         model = joblib.load(MODELS / current["file"])
         classes = model.classes_
@@ -128,7 +173,8 @@ def run_training(min_auc_drop=0.02):
     promoted = current is None or metrics["roc_auc"] >= current["metrics"]["roc_auc"] - min_auc_drop
 
     entry = {"version": version, "file": file, "trained_at": datetime.now(timezone.utc).isoformat(),
-             "n_train_images": len(train_df), "n_uploaded_images": n_uploads,
+             "n_train_images": len(train_df), "n_uploaded_images": len(uploaded_rows),
+             "used_upload_digests": sorted(used | new_digests),
              "params": params, "metrics": metrics, "promoted": promoted,
              "parent_version": current["version"] if current else None}
     reg["versions"].append(entry)                     # keep a record even if not promoted

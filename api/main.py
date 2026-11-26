@@ -1,4 +1,5 @@
 """NeuroTrace REST API: predict, upload, retrain, monitor."""
+import hashlib
 import os
 import threading
 import time
@@ -8,7 +9,8 @@ from typing import List
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 
-from src.model import DATA, LABELS, load_registry, run_training
+from src.model import (DATA, LABELS, active_entry, fixed_image_digests, load_registry,
+                       run_training, upload_status, used_upload_digests)
 from src.prediction import get_model, predict
 from src.preprocessing import extract_features
 from src.uploads import save_uploads
@@ -77,13 +79,25 @@ async def upload_training_data(label: str = Form(...), files: List[UploadFile] =
     """Bulk upload LABELLED images; they are added to the training pool for the next retrain."""
     if label not in LABELS:
         raise HTTPException(400, f"label must be one of {LABELS}")
-    accepted, rejected = [], []
+    try:
+        used = used_upload_digests(active_entry(load_registry()))
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+    fixed_images = fixed_image_digests(DATA)
+    accepted, rejected, already_used, fixed_set = [], [], [], []
     for file in files:
         name = Path(file.filename or "").name
         if Path(name).suffix.lower() not in ALLOWED:
             rejected.append(name)
             continue
         content = await file.read()
+        digest = hashlib.sha256(content).hexdigest()
+        if digest in used:
+            already_used.append(name)
+            continue
+        if digest in fixed_images:
+            fixed_set.append(name)
+            continue
         try:
             extract_features(content, check_input=True)
         except ValueError:
@@ -92,7 +106,16 @@ async def upload_training_data(label: str = Form(...), files: List[UploadFile] =
         accepted.append((name, content))
     saved, duplicates, counts = save_uploads(DATA / "uploads", label, accepted)
     return {"label": label, "saved": saved, "rejected": rejected, "duplicates": duplicates,
+            "already_used": already_used, "fixed_set": fixed_set, "batch": upload_status(),
             "total_uploaded": {label: counts.get(label, 0) for label in LABELS}}
+
+
+@app.get("/uploads/status")
+def get_upload_status():
+    try:
+        return upload_status()
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
 
 
 def _retrain_job():
@@ -112,6 +135,15 @@ def trigger_retrain():
     """The retrain button: start training in the background and return immediately."""
     if not retrain_lock.acquire(blocking=False):         # someone already pressed it
         raise HTTPException(409, "Retraining already running")
+    try:
+        if not upload_status()["pending"]:
+            raise ValueError("No new uploads are pending for the active model.")
+    except ValueError as error:
+        retrain_lock.release()
+        raise HTTPException(400, str(error)) from error
+    except Exception:
+        retrain_lock.release()
+        raise
     retrain_state.update(status="running", started_at=datetime.now(timezone.utc).isoformat(),
                          finished_at=None, result=None, error=None)
     threading.Thread(target=_retrain_job, daemon=True).start()

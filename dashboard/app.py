@@ -24,7 +24,7 @@ def api(method, path, timeout=120, **kwargs):
         r.raise_for_status()                           # turn 4xx/5xx into an exception
         return r.json()
     except requests.HTTPError as error:
-        if error.response.status_code == 400:
+        if error.response.status_code in {400, 409}:
             try:
                 detail = error.response.json().get("detail")
             except ValueError:
@@ -143,17 +143,20 @@ with tab_train:
             res = api("POST", "/upload", timeout=300, data={"label": label},
                       files=[("files", (f.name, f.getvalue(), f.type)) for f in batch])
         if res:
-            st.success(f"Saved {res['saved']} image(s). Waiting for retraining: "
-                       f"{res['total_uploaded']['healthy']} healthy, {res['total_uploaded']['parkinson']} parkinson.")
+            st.write(f"New images saved in this upload: {res['saved']}.")
             if res["rejected"]:
                 st.warning(f"Unsupported images: {res['rejected']}")
 
             if res.get("duplicates"):
                 st.info(f"Already saved: {res['duplicates']}")
+            if res.get("already_used"):
+                st.info(f"Already used by the active model: {res['already_used']}")
+            if res.get("fixed_set"):
+                st.warning(f"Already in the bundled training or evaluation set: {res['fixed_set']}")
 
     st.subheader("2 · Retrain the model")
     st.write("Accepted images are saved in SQLite. Retraining loads the active forest and "
-             "adds 50 trees using the base training images and the labelled uploads. "
+             "adds 50 trees using the base training images and uploads the active model has yet to use. "
              "The existing and candidate models are compared on the shared evaluation set.")
     if st.button("🔁 Trigger retraining", type="primary"):
         if api("POST", "/retrain"):
@@ -169,17 +172,24 @@ with tab_train:
                     r = state["result"]
                     verdict = "✅ promoted to live" if r["promoted"] else "⛔ kept offline (quality gate)"
                     status.update(label=f"Model v{r['version']} trained - {verdict}", state="complete")
-                    st.caption(f"Started from model v{r.get('parent_version')} · {r['n_uploaded_images']} uploaded images")
+                    st.caption(f"Started from model v{r.get('parent_version')} · {r['n_uploaded_images']} new uploads used in this run")
                     st.json(r["metrics"])
                 else:
                     status.update(label=f"Retraining failed: {state.get('error')}", state="error")
+
+    batch_status = api("GET", "/uploads/status")
+    if batch_status is not None:
+        stored, used, pending = st.columns(3)
+        stored.metric("Stored uploads", batch_status["stored"])
+        used.metric("Stored uploads used by active model", batch_status["used"])
+        pending.metric("Pending uploads", batch_status["pending"])
 
     st.subheader("3 · Model versions")
     registry = api("GET", "/models")
     if registry and registry["versions"]:
         rows = [{"version": f"v{v['version']}" + (" (live)" if v["version"] == registry["active"] else ""),
                  "trained_at": v["trained_at"][:19].replace("T", " "), "train images": v["n_train_images"],
-                 "uploaded": v["n_uploaded_images"], "promoted": v["promoted"], **v["metrics"]}
+                 "new uploads used": v["n_uploaded_images"], "promoted": v["promoted"], **v["metrics"]}
                 for v in registry["versions"]]
         table = pd.DataFrame(rows)
         st.dataframe(table, width="stretch", hide_index=True)

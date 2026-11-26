@@ -7,8 +7,9 @@ a Streamlit dashboard, monitoring and versioned retraining.
 
 - GitHub — https://github.com/ambabazi/ml-pipeline-summative
 - API docs — https://neurotrace-api-it4i.onrender.com/docs
-- Dashboard — http://localhost:8501 after starting the local or Docker deployment
+- Dashboard — local/Docker only at http://localhost:8501; not publicly hosted
 - YouTube demo — pending upload
+- YouTube script and screen cues — [docs/youtube-demo-script.md](docs/youtube-demo-script.md)
 
 ## Run locally
 
@@ -21,8 +22,11 @@ python -m pip install -r requirements.txt -r dashboard/requirements.txt
 streamlit run dashboard/app.py
 ```
 
-Open `http://localhost:8501`. The dashboard connects to the Render API by default.
-For a local API, run `uvicorn api.main:app --port 8000` in one terminal and
+Open `http://localhost:8501`. By default, the dashboard connects to the
+public Render API, so uploaded images and retraining requests go to that
+service. For a self-contained local demo, use the Docker deployment below.
+To run the dashboard with a local API without Docker, run
+`uvicorn api.main:app --port 8000` in one terminal and
 `API_URL=http://localhost:8000 streamlit run dashboard/app.py` in another.
 
 For notebook work, install `jupyterlab matplotlib seaborn tensorflow-cpu` in the
@@ -36,22 +40,39 @@ The raw dataset source is [HandPD](https://www2.fc.unesp.br/~papa/pub/datasets/H
 OpenCV separates the pen trace from the printed template and extracts nine
 measurements. The API loads the active Random Forest listed in
 `models/registry.json`. Upload one JPG or PNG in Predict to see its class and
-model score. Use labelled images from `data/retrain_batch/` for a bulk retrain
-demo. Upload one label at a time and click Trigger retraining.
+model score. For retraining, upload a labelled batch that has not already been
+used to train or evaluate the active model, then click Trigger retraining.
+The existing `data/retrain_batch/` files were already used to produce v2; use
+the isolated v1 replay described below if demonstrating with those files again.
 
 Accepted images and their labels are saved in `data/uploads/uploads.sqlite3`.
-An exact duplicate is skipped. Retraining loads the active pretrained forest
-and adds 50 trees using the base images and accumulated uploads. Earlier
-trees are retained. The model history records the starting version and the
+The API skips exact duplicates, including copies of bundled base or evaluation
+images and drawings already used by the active model. Retraining loads the
+active forest and adds 50 trees using the base images and pending uploads.
+Pending uploads become used when a candidate is promoted. A rejected
+candidate leaves its batch pending. The dashboard shows newly saved, stored,
+used, and pending counts. File fingerprints check exact copies. Uploaders
+must also keep other drawings from evaluation participants out of training. The model history records the starting version and the
 outcome. The candidate is promoted when its ROC-AUC on the shared evaluation
 set is within 0.02 of the active model or higher. Because this set is used
 for promotion, an independent future cohort would give a stronger final check.
 
-On 152 test images from 19 participants, the deployed v1 model had accuracy
-0.776, precision 0.922, recall 0.783, specificity 0.750, F1 0.847 and ROC-AUC
-0.798. The notebook compares a separate Random Forest experiment with a CNN and
-includes a grouped development comparison with Extra Trees and logistic regression.
-This project is an educational prototype for classifying drawings.
+On the shared 152-image evaluation set from 19 held-out participants, the
+original production model v1 scored accuracy 0.776, precision 0.922, recall
+0.783, specificity 0.750, F1 0.847 and ROC-AUC 0.798. Retrained model v2,
+selected as active in the registry, scored 0.789, 0.923, 0.800, 0.750, 0.857
+and 0.805, respectively. This evaluation set was also used for the promotion
+decision, so these results are not an independent final estimate of
+generalization. The notebook separately compares an engineered-feature
+Random Forest with a CNN and includes grouped development comparisons with
+Extra Trees and logistic regression. This project is an educational prototype
+for classifying drawings.
+
+The current v2 was trained using the 120 images in `data/retrain_batch/`.
+Do not present those same files as new training data when retraining v2 again.
+For a repeatable demonstration with this batch, use an isolated copy of the
+project configured to start from v1, or obtain a new labelled batch that was
+not used for training or evaluation.
 
 ### Unsupported uploads
 
@@ -74,8 +95,11 @@ the service uses persistent storage.
 1. Show the dashboard uptime and live model version.
 2. Predict `data/test/healthy/spiral_0102-1.jpg` and compare it with its dataset
    label. Try a blank image or unrelated photo and report what happens.
-3. Upload images from `data/retrain_batch/healthy/` with the healthy label,
-   then repeat with `data/retrain_batch/parkinson/`. Show the saved counts.
+3. To replay the original 120-image retraining, follow the isolated v1 setup
+   in `docs/youtube-demo-script.md` before uploading `data/retrain_batch/`.
+   Since the registry already contains versions 1 and 2, this replay creates a
+   v3 candidate with v1 as its parent. Otherwise, upload only a new labelled
+   batch not already used for training or evaluation.
 4. Trigger retraining. Show the parent version, candidate metrics, promotion
    result and active model version. Make one more prediction.
 5. Show the three feature plots and explain the saved Locust results.

@@ -42,10 +42,12 @@ def save_uploads(directory, label, images):
     return saved, duplicates, counts
 
 
-def read_uploads(directory):
+def read_uploads(directory, *, include_content=True):
     if not (Path(directory) / "uploads.sqlite3").is_file():
         return []
     with upload_database(directory) as connection:
-        return connection.execute(
-            "SELECT label, filename, content FROM uploads ORDER BY rowid"
-        ).fetchall()
+        query = (
+            "SELECT digest, label, filename, content FROM uploads ORDER BY rowid"
+            if include_content else "SELECT digest, label, filename FROM uploads ORDER BY rowid"
+        )
+        return connection.execute(query).fetchall()
