@@ -1,5 +1,5 @@
 {
-  "active": 1,
+  "active": 2,
   "versions": [
     {
       "version": 1,
@@ -21,6 +21,29 @@
         "roc_auc": 0.7982
       },
       "promoted": true
+    },
+    {
+      "version": 2,
+      "file": "neurotrace_rf_v2.pkl",
+      "trained_at": "2026-11-26T18:35:12.796884+00:00",
+      "n_train_images": 584,
+      "n_uploaded_images": 120,
+      "params": {
+        "n_estimators": 350,
+        "max_depth": 5,
+        "min_samples_leaf": 1,
+        "warm_start": true
+      },
+      "metrics": {
+        "accuracy": 0.7895,
+        "precision": 0.9231,
+        "recall": 0.8,
+        "specificity": 0.75,
+        "f1": 0.8571,
+        "roc_auc": 0.8047
+      },
+      "promoted": true,
+      "parent_version": 1
     }
   ]
 }
