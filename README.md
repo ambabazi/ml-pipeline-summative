@@ -7,33 +7,89 @@ a Streamlit dashboard, monitoring and versioned retraining.
 
 - GitHub — https://github.com/ambabazi/ml-pipeline-summative
 - API docs — https://neurotrace-api-it4i.onrender.com/docs
-- Dashboard — local/Docker only at http://localhost:8501; not publicly hosted
-- YouTube demo — pending upload
+- Local dashboard — http://localhost:8501 after startup
+- YouTube demo — link pending recording
 - YouTube script and screen cues — [docs/youtube-demo-script.md](docs/youtube-demo-script.md)
 
 ## Run locally
 
-Use Python 3.12 from the repository root.
+Install [Python 3.12](https://www.python.org/downloads/) and
+[Git](https://git-scm.com/downloads). Clone the repository or extract the
+submission ZIP, then open a terminal in the project root.
+
+```text
+git clone https://github.com/ambabazi/ml-pipeline-summative.git
+cd ml-pipeline-summative
+```
+
+### Windows PowerShell
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r dashboard/requirements.txt
+```
+
+You can activate the environment with `.\.venv\Scripts\Activate.ps1`.
+The commands below call the virtual environment's Python directly, so
+they also work when PowerShell blocks activation scripts.
+
+### Linux and macOS
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt -r dashboard/requirements.txt
-streamlit run dashboard/app.py
 ```
 
-Open `http://localhost:8501`. By default, the dashboard connects to the
-public Render API, so uploaded images and retraining requests go to that
-service. For a self-contained local demo, use the Docker deployment below.
-To run the dashboard with a local API without Docker, run
-`uvicorn api.main:app --port 8000` in one terminal and
-`API_URL=http://localhost:8000 streamlit run dashboard/app.py` in another.
+The root requirements install FastAPI, Uvicorn, OpenCV and the model
+dependencies. The dashboard requirements install Streamlit and its charting
+and HTTP dependencies. SQLite is included with Python.
 
-For notebook work, install `jupyterlab matplotlib seaborn tensorflow-cpu` in the
-same environment. Open `notebook/neurotrace.ipynb` with the notebook directory
-as its working directory. The prepared train and test data are in `data/`.
-The raw dataset source is [HandPD](https://www2.fc.unesp.br/~papa/pub/datasets/Handpd/).
-`scripts/split_data.py` documents the participant-grouped split.
+### Start a local API and dashboard
+
+Use two terminals from the project root. On Linux or macOS, activate the
+environment in both terminals.
+
+| Terminal | Windows PowerShell | Linux or macOS |
+| --- | --- | --- |
+| 1 · API | `.\.venv\Scripts\python.exe -m uvicorn api.main:app --port 8000` | `python -m uvicorn api.main:app --port 8000` |
+| 2 · Dashboard URL setting | `$env:API_URL = "http://127.0.0.1:8000"` | `export API_URL=http://127.0.0.1:8000` |
+| 2 · Start dashboard | `.\.venv\Scripts\python.exe -m streamlit run dashboard/app.py` | `python -m streamlit run dashboard/app.py` |
+
+Open the [dashboard](http://localhost:8501), [API health](http://127.0.0.1:8000/health)
+and [API docs](http://127.0.0.1:8000/docs). Without the `API_URL` override,
+Streamlit uses the deployed Render API, including for upload and retraining.
+
+### Run the notebook
+
+The executed notebook is `notebook/neurotrace.ipynb`. To rerun it, install
+JupyterLab, Matplotlib and seaborn in the virtual environment:
+
+```text
+python -m pip install jupyterlab matplotlib seaborn
+```
+
+Install `tensorflow-cpu` on supported Linux or Windows setups, or `tensorflow`
+on supported macOS setups. Check the platform and Python version first
+if pip cannot resolve a wheel. This dependency is needed for the CNN
+notebook cells. [TensorFlow installation guide](https://www.tensorflow.org/install/pip)
+
+From the project root, run `cd notebook` and `python -m jupyterlab`. On
+Windows, either activate the environment first or use
+`..\.venv\Scripts\python.exe -m jupyterlab` from that folder. The prepared
+data is under `data/`. The [HandPD source](https://www2.fc.unesp.br/~papa/pub/datasets/Handpd/)
+and `scripts/split_data.py` document acquisition and the split.
+
+## Where to find things
+
+| Path | Contents |
+| --- | --- |
+| `notebook/` | Executed experiments, feature plots and model evaluation |
+| `data/` | Prepared training, test and original retraining drawings |
+| `src/` | Image preprocessing, prediction, retraining and SQLite storage |
+| `models/` | Saved models and active-version registry |
+| `api/` and `dashboard/` | FastAPI endpoints and Streamlit interface |
+| `monitoring/` and `reports/` | Locust workload, benchmark CSVs and figures |
 
 ## How the pipeline works
 
@@ -52,21 +108,29 @@ active forest and adds 50 trees using the base images and pending uploads.
 Pending uploads become used when a candidate is promoted. A rejected
 candidate leaves its batch pending. The dashboard shows newly saved, stored,
 used, and pending counts. File fingerprints check exact copies. Uploaders
-must also keep other drawings from evaluation participants out of training. The model history records the starting version and the
-outcome. The candidate is promoted when its ROC-AUC on the shared evaluation
+must also keep other drawings from evaluation participants out of training.
+The model history records the starting version and the outcome. The candidate is promoted when its ROC-AUC on the shared evaluation
 set is within 0.02 of the active model or higher. Because this set is used
 for promotion, an independent future cohort would give a stronger final check.
 
-On the shared 152-image evaluation set from 19 held-out participants, the
-original production model v1 scored accuracy 0.776, precision 0.922, recall
-0.783, specificity 0.750, F1 0.847 and ROC-AUC 0.798. Retrained model v2,
-selected as active in the registry, scored 0.789, 0.923, 0.800, 0.750, 0.857
-and 0.805, respectively. This evaluation set was also used for the promotion
-decision, so these results are not an independent final estimate of
-generalization. The notebook separately compares an engineered-feature
-Random Forest with a CNN and includes grouped development comparisons with
-Extra Trees and logistic regression. This project is an educational prototype
-for classifying drawings.
+### Model results
+
+These results use the same 152 drawings from 19 held-out exam groups.
+The HandPD metadata links some participant IDs to exams on both sides
+of the split, so these scores measure performance on held-out exams.
+A participant-independent evaluation would require a split based on
+verified participant IDs and retraining.
+
+| Production model | Accuracy | Precision | Recall | Specificity | F1 | ROC-AUC |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| v1 · Original forest | 0.7763 | 0.9216 | 0.7833 | 0.7500 | 0.8468 | 0.7982 |
+| v2 · Forest selected for deployment | 0.7895 | 0.9231 | 0.8000 | 0.7500 | 0.8571 | 0.8047 |
+
+The live version is visible in the [Render model registry](https://neurotrace-api-it4i.onrender.com/models).
+Streamlit rounds the score to three decimal places. The notebook also
+compares a separate engineered-feature Random Forest with a CNN and
+includes grouped development comparisons with Extra Trees and logistic
+regression. NeuroTrace is an educational prototype for classifying drawings.
 
 The current v2 was trained using the 120 images in `data/retrain_batch/`.
 Do not present those same files as new training data when retraining v2 again.
@@ -84,13 +148,26 @@ Testing on unrelated photos is separate from evaluating the drawing classifier.
 
 ## Docker deployment and demo
 
-Run `docker compose up -d --build`, then open the dashboard at
-`http://localhost:8501` and the API docs at `http://localhost:8080/docs`.
-Compose runs Streamlit, Nginx, and the API. Named volumes retain the SQLite
-database and versioned model artifacts across container replacements. Use
-one API replica for the retraining demo because job status is held in that
-process. On Render, files written to the container are temporary unless
-the service uses persistent storage.
+Install [Docker with Compose v2](https://docs.docker.com/compose/install/).
+On Windows or macOS, start Docker Desktop first. On Linux, start Docker
+Engine if you use the Compose plugin. From the project root, run:
+
+```text
+docker compose config --quiet
+docker compose up -d --build --scale api=1
+docker compose ps
+```
+
+Open the [dashboard](http://localhost:8501), [API health](http://localhost:8080/health)
+or [upload status](http://localhost:8080/uploads/status). Compose starts
+Streamlit, Nginx and the API. Use one API replica for retraining because
+job status is held in that process. Named volumes keep the SQLite data
+and model artifacts between runs. An existing model volume can retain an
+earlier registry even after rebuilding the image. Use a separate Compose
+project for a fresh demo. If a service fails, run
+`docker compose logs --tail=100 api nginx dashboard`.
+`docker compose down` stops this stack and preserves its volumes.
+Render needs a persistent disk to retain runtime changes across deploys.
 
 1. Show the dashboard uptime and live model version.
 2. Predict `data/test/healthy/spiral_0102-1.jpg` and compare it with its dataset
@@ -122,15 +199,14 @@ consistently with more replicas. Render is a separate environment with
 different compute and network conditions.
 
 Raw results are in `reports/load_tests/`. To reproduce a local run, install
-Locust, then run the following from the repository root. Repeat with replica
+Locust with `python -m pip install locust`, then run the following from the repository root. Repeat with replica
 counts 2 and 4, changing the CSV prefix each time. The current API can reject some images
 in the original workload. Report these responses separately when comparing
 new runs to the historical results.
 
-```bash
+```text
 docker compose up -d --build --scale api=1
-curl -fsS http://localhost:8080/health
-locust -f monitoring/locustfile.py --headless \
-  --host http://localhost:8080 -u 100 -r 10 -t 60s \
-  --csv /tmp/neurotrace_containers_1
+python -m locust -f monitoring/locustfile.py --headless --host http://localhost:8080 -u 100 -r 10 -t 60s --csv neurotrace_containers_1
 ```
+
+Check [API health](http://localhost:8080/health) before starting Locust.

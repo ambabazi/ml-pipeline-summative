@@ -12,12 +12,12 @@ rows = []
 for drawing in ["Spiral", "Meander"]:
     for folder, label in [("Control", "healthy"), ("Patients", "parkinson")]:
         for img in (RAW / f"{drawing}_HandPD" / f"{drawing}{folder}").glob("*.jpg"):
-            person_id = img.stem.split("-")[0]          # "0068-1" -> "0068"
+            person_id = img.stem.split("-")[0]
             rows.append({
                 "path": img,
                 "label": label,
                 "drawing": drawing.lower(),
-                "person": f"{label}_{person_id}",       # label prefix in case IDs repeat across folders
+                "person": f"{label}_{person_id}",
             })
 df = pd.DataFrame(rows)
 print("People per class:\n", df.groupby("label")["person"].nunique())
@@ -28,7 +28,7 @@ train_idx, test_idx = next(sgkf.split(df, df["label"], groups=df["person"]))
 df["split"] = "train"
 df.loc[test_idx, "split"] = "test"
 
-# 3. Prove there is no leakage (the script crashes if any person is in both)
+# Check that the derived participant groups are disjoint.
 overlap = set(df[df.split == "train"].person) & set(df[df.split == "test"].person)
 assert not overlap, f"Leakage! {overlap}"
 

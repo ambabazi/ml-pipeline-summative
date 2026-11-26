@@ -18,26 +18,26 @@ from src.uploads import save_uploads
 app = FastAPI(title="NeuroTrace API", version="1.0",
               description="Parkinson's drawing-pattern screening prototype - NOT a diagnostic tool.")
 
-STARTED = time.time()                                    # for uptime
-CONTAINER = os.getenv("HOSTNAME", "local")               # Docker sets HOSTNAME = container id -> shows load balancing
-stats = {"requests": 0, "errors": 0, "predictions": 0, "total_latency_ms": 0.0}   # simple in-memory counters
+STARTED = time.time()
+CONTAINER = os.getenv("HOSTNAME", "local")
+stats = {"requests": 0, "errors": 0, "predictions": 0, "total_latency_ms": 0.0}
 retrain_state = {"status": "idle", "started_at": None, "finished_at": None, "result": None, "error": None}
-retrain_lock = threading.Lock()                          # only one retraining at a time
-ALLOWED = {".jpg", ".jpeg", ".png"}                      # accepted image types
+retrain_lock = threading.Lock()
+ALLOWED = {".jpg", ".jpeg", ".png"}
 
 
 @app.middleware("http")
 async def track_latency(request: Request, call_next):
     """Runs around every request: count it and time it."""
-    start = time.perf_counter()                          # precise timer start
-    response = await call_next(request)                  # run the actual endpoint
-    ms = (time.perf_counter() - start) * 1000            # elapsed time in milliseconds
+    start = time.perf_counter()
+    response = await call_next(request)
+    ms = (time.perf_counter() - start) * 1000
     stats["requests"] += 1
     stats["total_latency_ms"] += ms
-    if response.status_code >= 400:                      # 4xx/5xx = error
+    if response.status_code >= 400:
         stats["errors"] += 1
-    response.headers["X-Process-Time-ms"] = f"{ms:.1f}"   # latency visible to clients / Locust
-    response.headers["X-Container"] = CONTAINER          # which container answered
+    response.headers["X-Process-Time-ms"] = f"{ms:.1f}"
+    response.headers["X-Container"] = CONTAINER
     return response
 
 
@@ -47,7 +47,7 @@ def health():
     try:
         _, version = get_model()
         model_status = "loaded"
-    except Exception:                                    # no model trained yet
+    except Exception:
         version, model_status = None, "missing"
     return {"status": "ok", "model_status": model_status, "model_version": version,
             "uptime_seconds": round(time.time() - STARTED, 1), "container": CONTAINER,
@@ -57,7 +57,7 @@ def health():
 @app.get("/stats")
 def get_stats():
     """Request counters and average latency for this container."""
-    n = stats["requests"] or 1                           # avoid dividing by zero
+    n = stats["requests"] or 1
     return {**stats, "avg_latency_ms": round(stats["total_latency_ms"] / n, 2), "container": CONTAINER}
 
 
@@ -65,10 +65,10 @@ def get_stats():
 async def predict_drawing(file: UploadFile = File(...)):
     """Upload ONE spiral/meander image -> prediction + confidence + the features behind it."""
     if Path(file.filename or "").suffix.lower() not in ALLOWED:
-        raise HTTPException(400, "Please upload a .jpg or .png image")   # reject non-images early
+        raise HTTPException(400, "Please upload a .jpg or .png image")
     try:
-        result = predict(await file.read())              # read the bytes and predict
-    except ValueError as e:                              # unreadable image
+        result = predict(await file.read())
+    except ValueError as e:
         raise HTTPException(400, str(e))
     stats["predictions"] += 1
     return {**result, "disclaimer": "Research prototype - not a medical diagnosis."}
@@ -127,13 +127,13 @@ def _retrain_job():
         retrain_state.update(status="failed", error=str(e))
     finally:
         retrain_state["finished_at"] = datetime.now(timezone.utc).isoformat()
-        retrain_lock.release()                           # allow the next retrain
+        retrain_lock.release()
 
 
 @app.post("/retrain")
 def trigger_retrain():
     """The retrain button: start training in the background and return immediately."""
-    if not retrain_lock.acquire(blocking=False):         # someone already pressed it
+    if not retrain_lock.acquire(blocking=False):
         raise HTTPException(409, "Retraining already running")
     try:
         if not upload_status()["pending"]:
@@ -152,7 +152,7 @@ def trigger_retrain():
 
 @app.get("/retrain/status")
 def retrain_status():
-    return retrain_state                                 # running / completed / failed + new version's metrics
+    return retrain_state
 
 
 @app.get("/models")

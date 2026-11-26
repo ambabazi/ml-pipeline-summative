@@ -8,11 +8,11 @@ import plotly.express as px
 import requests
 import streamlit as st
 
-API_URL = os.getenv("API_URL", "https://neurotrace-api-it4i.onrender.com").rstrip("/")  # the deployed FastAPI service
-ROOT = Path(__file__).resolve().parent.parent          # project root (dashboard/..)
-FEATURES_CSV = ROOT / "reports" / "features.csv"       # features of every train/test image, exported by the notebook
-LOAD_TESTS = ROOT / "reports" / "load_tests"           # Locust CSV results
-COLORS = {"healthy": "#2a9d8f", "parkinson": "#e76f51"}  # one colour per class, used in every chart
+API_URL = os.getenv("API_URL", "https://neurotrace-api-it4i.onrender.com").rstrip("/")
+ROOT = Path(__file__).resolve().parent.parent
+FEATURES_CSV = ROOT / "reports" / "features.csv"
+LOAD_TESTS = ROOT / "reports" / "load_tests"
+COLORS = {"healthy": "#2a9d8f", "parkinson": "#e76f51"}
 
 st.set_page_config(page_title="NeuroTrace", page_icon="🌀", layout="wide")
 
@@ -21,7 +21,7 @@ def api(method, path, timeout=120, **kwargs):
     """Call the API and return JSON, or None (with an error message) if it fails."""
     try:
         r = requests.request(method, f"{API_URL}{path}", timeout=timeout, **kwargs)
-        r.raise_for_status()                           # turn 4xx/5xx into an exception
+        r.raise_for_status()
         return r.json()
     except requests.HTTPError as error:
         if error.response.status_code in {400, 409}:
@@ -45,7 +45,6 @@ def fmt_uptime(seconds):
     return f"{d}d {h}h {rem // 60}m" if d else f"{h}h {rem // 60}m {rem % 60}s"
 
 
-# ---------------- Header ----------------
 st.title("🌀 NeuroTrace")
 st.caption("Classifying Parkinsonian patterns in hand-drawn spirals and meanders - "
            "**a research screening prototype, not a diagnostic tool.**")
@@ -53,7 +52,7 @@ st.caption("Classifying Parkinsonian patterns in hand-drawn spirals and meanders
 tab_overview, tab_predict, tab_insights, tab_train, tab_monitor = st.tabs(
     ["📊 Overview", "🔍 Predict", "📈 Data insights", "🔁 Train & retrain", "⚡ Monitoring"])
 
-# ---------------- 1. Overview: uptime + live model ----------------
+# Show API uptime and active-model metrics.
 with tab_overview:
     st.info("The free cloud server sleeps when idle - the first request can take up to a minute.")
     health = api("GET", "/health")
@@ -75,7 +74,7 @@ with tab_overview:
                    f"({live['n_uploaded_images']} uploaded). Scored on the shared evaluation set "
                    "(152 images, 19 people) every time.")
 
-# ---------------- 2. Predict one drawing ----------------
+# Upload one drawing and display its predicted class and features.
 with tab_predict:
     st.subheader("Analyse one drawing")
     image = st.file_uploader("Upload a blue-ink spiral or meander on a dark printed guide (JPG/PNG)", type=["jpg", "jpeg", "png"])
@@ -91,7 +90,6 @@ with tab_predict:
                 right.metric("Model score for this class", f"{res['confidence']:.0%}")
                 right.progress(res["probability_parkinson"], text=f"Parkinson’s-group score = {res['probability_parkinson']:.2f}")
                 right.caption(f"Model v{res['model_version']} · {res['disclaimer']}")
-                # Compare this drawing's features with the typical healthy / Parkinson's drawing
                 if FEATURES_CSV.exists():
                     med = pd.read_csv(FEATURES_CSV).groupby("label").median(numeric_only=True).T
                     med = med.loc[med.index.intersection(res["features"])]
@@ -99,7 +97,7 @@ with tab_predict:
                     st.markdown("**How this drawing compares with typical drawings (medians)**")
                     st.dataframe(med[["this drawing", "healthy", "parkinson"]].round(3), width="stretch")
 
-# ---------------- 3. Data insights: 3 features, interpreted ----------------
+# Compare the distributions of three image features.
 with tab_insights:
     if not FEATURES_CSV.exists():
         st.warning("reports/features.csv not found - export it from the notebook.")
@@ -133,7 +131,7 @@ with tab_insights:
             c2.write(story)
         st.caption("The groups overlap on all three measures. Ink colour and scan quality can change the measurements.")
 
-# ---------------- 4. Upload data + retrain ----------------
+# Save labelled uploads and track the retraining batch.
 with tab_train:
     st.subheader("1 · Upload labelled drawings (bulk)")
     label = st.radio("These drawings are from:", ["healthy", "parkinson"], horizontal=True)
@@ -167,7 +165,7 @@ with tab_train:
                     if state.get("status") != "running":
                         break
                     status.update(label=f"Retraining in progress... {int(time.time() - start)} s")
-                    time.sleep(5)                       # check again every 5 seconds
+                    time.sleep(5)
                 if state.get("status") == "completed":
                     r = state["result"]
                     verdict = "✅ promoted to live" if r["promoted"] else "⛔ kept offline (quality gate)"
@@ -199,7 +197,7 @@ with tab_train:
                                title="Version comparison on the same test set", range_y=[0, 1]),
                         width="stretch")
 
-# ---------------- 5. Monitoring: live stats + load tests ----------------
+# Show live request metrics and recorded Locust benchmarks.
 with tab_monitor:
     stats = api("GET", "/stats")
     if stats:

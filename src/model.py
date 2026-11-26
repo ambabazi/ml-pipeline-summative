@@ -16,28 +16,28 @@ from sklearn.utils.class_weight import compute_class_weight
 from src.preprocessing import FEATURES, extract_features
 from src.uploads import read_uploads
 
-ROOT = Path(__file__).resolve().parent.parent       # project root (src/..), works from any working directory
-DATA = ROOT / "data"                                  # data/train, data/test, data/uploads
-MODELS = ROOT / "models"                              # saved .pkl files + registry
-REGISTRY = MODELS / "registry.json"                   # list of all model versions + which one is live
-LABELS = ["healthy", "parkinson"]                     # class 0, class 1
+ROOT = Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+MODELS = ROOT / "models"
+REGISTRY = MODELS / "registry.json"
+LABELS = ["healthy", "parkinson"]
 
 
 def person_of(path):
     """'healthy/spiral_0068-1.jpg' -> 'healthy_0068' so one person's drawings stay together."""
     path = Path(path)
-    return f"{path.parent.name}_{path.stem.split('_')[-1].split('-')[0]}"   # label + person number
+    return f"{path.parent.name}_{path.stem.split('_')[-1].split('-')[0]}"
 
 
 def image_table(paths):
     """List of image paths -> DataFrame with label, person and the 9 features."""
     rows = []
     for p in paths:
-        row = extract_features(p)                     # the 9 numbers
-        row.update(path=str(p), label=Path(p).parent.name, person=person_of(p))  # folder name = label
+        row = extract_features(p)
+        row.update(path=str(p), label=Path(p).parent.name, person=person_of(p))
         rows.append(row)
     df = pd.DataFrame(rows)
-    df["y"] = (df.label == "parkinson").astype(int)   # 1 = Parkinson's, 0 = healthy
+    df["y"] = (df.label == "parkinson").astype(int)
     return df
 
 
@@ -98,15 +98,15 @@ def train(df):
     grid = GridSearchCV(
         RandomForestClassifier(class_weight="balanced", random_state=42),
         param_grid={"n_estimators": [100, 300], "max_depth": [3, 5, None], "min_samples_leaf": [1, 5]},
-        cv=StratifiedGroupKFold(n_splits=5), scoring="roc_auc", n_jobs=-1)   # n_jobs=-1: use all CPU cores
-    grid.fit(df[FEATURES], df.y, groups=df.person)    # groups = no person in two folds
+        cv=StratifiedGroupKFold(n_splits=5), scoring="roc_auc", n_jobs=-1)
+    grid.fit(df[FEATURES], df.y, groups=df.person)
     return grid.best_estimator_, grid.best_params_
 
 
 def evaluate(model, test_df):
     """All the metrics, on the untouched test set."""
-    prob = model.predict_proba(test_df[FEATURES])[:, 1]   # P(Parkinson's) for each test image
-    pred = (prob >= 0.5).astype(int)                      # decision at 0.5
+    prob = model.predict_proba(test_df[FEATURES])[:, 1]
+    pred = (prob >= 0.5).astype(int)
     y = test_df.y
     return {
         "accuracy": round(accuracy_score(y, pred), 4),
@@ -120,14 +120,15 @@ def evaluate(model, test_df):
 
 def load_registry():
     if REGISTRY.exists():
-        return json.loads(REGISTRY.read_text())       # existing history of versions
-    return {"active": None, "versions": []}           # first run: empty registry
+        return json.loads(REGISTRY.read_text())
+    return {"active": None, "versions": []}
 
 
 def save_registry(reg):
     tmp = REGISTRY.with_suffix(".tmp")
     tmp.write_text(json.dumps(reg, indent=2))
-    tmp.replace(REGISTRY)                             # atomic swap: other containers never read a half-written file
+    # Replace the registry atomically so readers see a complete file.
+    tmp.replace(REGISTRY)
 
 
 def run_training(min_auc_drop=0.02):
@@ -177,12 +178,12 @@ def run_training(min_auc_drop=0.02):
              "used_upload_digests": sorted(used | new_digests),
              "params": params, "metrics": metrics, "promoted": promoted,
              "parent_version": current["version"] if current else None}
-    reg["versions"].append(entry)                     # keep a record even if not promoted
+    reg["versions"].append(entry)
     if promoted:
-        reg["active"] = version                       # switch the live model
+        reg["active"] = version
     save_registry(reg)
     return entry
 
 
-if __name__ == "__main__":                            # `python -m src.model` trains v1 from the command line
+if __name__ == "__main__":
     print(json.dumps(run_training(), indent=2))
