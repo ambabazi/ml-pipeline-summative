@@ -2,7 +2,6 @@
 import os
 import threading
 import time
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
@@ -11,6 +10,8 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 
 from src.model import DATA, LABELS, load_registry, run_training
 from src.prediction import get_model, predict
+from src.preprocessing import extract_features
+from src.uploads import save_uploads
 
 app = FastAPI(title="NeuroTrace API", version="1.0",
               description="Parkinson's drawing-pattern screening prototype - NOT a diagnostic tool.")
@@ -76,21 +77,22 @@ async def upload_training_data(label: str = Form(...), files: List[UploadFile] =
     """Bulk upload LABELLED images; they are added to the training pool for the next retrain."""
     if label not in LABELS:
         raise HTTPException(400, f"label must be one of {LABELS}")
-    folder = DATA / "uploads" / label                    # data/uploads/healthy or data/uploads/parkinson
-    folder.mkdir(parents=True, exist_ok=True)
-    saved, rejected = [], []
-    for f in files:
-        name = Path(f.filename or "").name               # strip any folder path from the filename (security)
+    accepted, rejected = [], []
+    for file in files:
+        name = Path(file.filename or "").name
         if Path(name).suffix.lower() not in ALLOWED:
             rejected.append(name)
             continue
-        dest = folder / name
-        if dest.exists():                                # don't overwrite: add a short unique suffix
-            dest = folder / f"{dest.stem}_{uuid.uuid4().hex[:6]}{dest.suffix}"
-        dest.write_bytes(await f.read())                 # save the image to disk
-        saved.append(dest.name)
-    return {"label": label, "saved": len(saved), "rejected": rejected,
-            "total_uploaded": {l: len(list((DATA / "uploads" / l).glob("*"))) for l in LABELS}}
+        content = await file.read()
+        try:
+            extract_features(content, check_input=True)
+        except ValueError:
+            rejected.append(name)
+            continue
+        accepted.append((name, content))
+    saved, duplicates, counts = save_uploads(DATA / "uploads", label, accepted)
+    return {"label": label, "saved": saved, "rejected": rejected, "duplicates": duplicates,
+            "total_uploaded": {label: counts.get(label, 0) for label in LABELS}}
 
 
 def _retrain_job():

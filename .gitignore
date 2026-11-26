@@ -3,3 +3,4 @@ __pycache__/
 .ipynb_checkpoints/
 data/raw/
 data/uploads/
+models/neurotrace_rf_notebook.pkl

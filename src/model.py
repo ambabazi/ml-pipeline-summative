@@ -9,8 +9,10 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (accuracy_score, f1_score, precision_score,
                              recall_score, roc_auc_score)
 from sklearn.model_selection import GridSearchCV, StratifiedGroupKFold
+from sklearn.utils.class_weight import compute_class_weight
 
 from src.preprocessing import FEATURES, extract_features
+from src.uploads import read_uploads
 
 ROOT = Path(__file__).resolve().parent.parent       # project root (src/..), works from any working directory
 DATA = ROOT / "data"                                  # data/train, data/test, data/uploads
@@ -90,21 +92,45 @@ def run_training(min_auc_drop=0.02):
     train_df = image_table(paths)
     test_df = image_table(sorted((DATA / "test").glob("*/*.jpg")))  # same test set every time = fair comparison
 
-    model, params = train(train_df)
-    metrics = evaluate(model, test_df)
+    uploaded_rows = read_uploads(DATA / "uploads")
+    if uploaded_rows:
+        features = [
+            dict(extract_features(content), y=int(label == "parkinson"),
+                 person=person_of(Path(label) / filename))
+            for label, filename, content in uploaded_rows
+        ]
+        train_df = pd.concat([train_df, pd.DataFrame(features)], ignore_index=True)
+        n_uploads += len(uploaded_rows)
 
     reg = load_registry()
-    version = len(reg["versions"]) + 1                # next version number
-    file = f"neurotrace_rf_v{version}.pkl"
-    joblib.dump(model, MODELS / file)                 # save the new model next to the old ones
+    current = next((v for v in reg["versions"] if v["version"] == reg["active"]), None)
+    if current is None:
+        model, params = train(train_df)
+    else:
+        if not n_uploads:
+            raise ValueError("Upload labelled drawings before retraining.")
+        # Preserve the active trees and fit a new block on the expanded training pool.
+        model = joblib.load(MODELS / current["file"])
+        classes = model.classes_
+        weights = compute_class_weight("balanced", classes=classes, y=train_df.y)
+        model.set_params(warm_start=True, n_estimators=model.n_estimators + 50,
+                         class_weight=dict(zip(classes, weights)))
+        model.fit(train_df[FEATURES], train_df.y)
+        params = {key: model.get_params()[key]
+                  for key in ("n_estimators", "max_depth", "min_samples_leaf", "warm_start")}
 
-    current = next((v for v in reg["versions"] if v["version"] == reg["active"]), None)  # the live model's entry
+    metrics = evaluate(model, test_df)
+    version = len(reg["versions"]) + 1
+    file = f"neurotrace_rf_v{version}.pkl"
+    joblib.dump(model, MODELS / file)
+
     # Quality gate: only go live if ROC-AUC is not worse than the live model by more than min_auc_drop
     promoted = current is None or metrics["roc_auc"] >= current["metrics"]["roc_auc"] - min_auc_drop
 
     entry = {"version": version, "file": file, "trained_at": datetime.now(timezone.utc).isoformat(),
              "n_train_images": len(train_df), "n_uploaded_images": n_uploads,
-             "params": params, "metrics": metrics, "promoted": promoted}
+             "params": params, "metrics": metrics, "promoted": promoted,
+             "parent_version": current["version"] if current else None}
     reg["versions"].append(entry)                     # keep a record even if not promoted
     if promoted:
         reg["active"] = version                       # switch the live model

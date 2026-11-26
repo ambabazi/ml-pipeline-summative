@@ -23,7 +23,7 @@ def get_model():
 def predict(source, threshold=0.5):
     """Image path or bytes -> prediction, probability, and the features behind it."""
     model, version = get_model()
-    feats = extract_features(source)                                         # same 9 features as training
+    feats = extract_features(source, check_input=True)                                        # same 9 features as training
     prob = float(model.predict_proba(pd.DataFrame([feats])[FEATURES])[0, 1])  # P(Parkinson's pattern)
     label = "parkinson" if prob >= threshold else "healthy"
     return {"prediction": label,

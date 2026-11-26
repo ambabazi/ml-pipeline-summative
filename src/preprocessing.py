@@ -12,6 +12,8 @@ FEATURES = ["ink_ratio", "deviation", "fragments", "deviation_p90", "deviation_s
 def load_image(source):
     """Read an image from a file path OR from raw bytes (what the API receives)."""
     if isinstance(source, (bytes, bytearray)):                       # uploaded file -> bytes
+        if not source:
+            raise ValueError("The uploaded image is empty.")
         arr = np.frombuffer(source, dtype=np.uint8)                   # bytes -> 1-D array of numbers
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)                     # decode JPEG/PNG -> BGR image
     else:
@@ -30,10 +32,26 @@ def separate_layers(img):
     return img, pen, template
 
 
-def extract_features(source):
-    """Image (path or bytes) -> dict of the 9 engineered features."""
-    _, pen, tpl = separate_layers(load_image(source))                 # load, then split into the two masks
-    pen_px, tpl_px = int((pen > 0).sum()), int((tpl > 0).sum())       # ink pixels / template pixels
+def extract_features(source, *, check_input=False):
+    """Extract drawing measurements, with an optional check for uploaded images."""
+    _, pen, tpl = separate_layers(load_image(source))
+    pen_px = int(np.count_nonzero(pen))
+    tpl_px = int(np.count_nonzero(tpl))
+
+    near_pen = cv2.dilate(pen, np.ones((5, 5), np.uint8)) > 0
+    ink_ratio = pen_px / max(tpl_px, 1)
+    template_coverage = np.count_nonzero(near_pen & (tpl > 0)) / max(tpl_px, 1)
+
+    if check_input and (
+        not pen_px
+        or not tpl_px
+        or not 0.5 <= ink_ratio <= 5
+        or template_coverage < 0.08
+    ):
+        raise ValueError(
+            "Could not assess this image. Upload a clear spiral or meander "
+            "traced in blue ink over a dark printed guide."
+        )
 
     dist_to_template = cv2.distanceTransform(255 - tpl, cv2.DIST_L2, 3)   # distance of every pixel to the template line
     dev = dist_to_template[pen > 0] if pen_px else np.zeros(1)            # ...measured only where the patient drew
