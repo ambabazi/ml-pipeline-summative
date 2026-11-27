@@ -8,7 +8,7 @@ a Streamlit dashboard, monitoring and versioned retraining.
 - GitHub — https://github.com/ambabazi/ml-pipeline-summative
 - API docs — https://neurotrace-api-it4i.onrender.com/docs#/
 - dashboard — (https://ml-pipeline-summative.streamlit.app/)
-- YouTube demo — link pending recording
+- YouTube demo — https://youtu.be/giYBEJO6vFQ
 
 ## Run locally
 
@@ -76,8 +76,47 @@ notebook cells. [TensorFlow installation guide](https://www.tensorflow.org/insta
 From the project root, run `cd notebook` and `python -m jupyterlab`. On
 Windows, either activate the environment first or use
 `..\.venv\Scripts\python.exe -m jupyterlab` from that folder. The prepared
-data is under `data/`. The [HandPD source](https://www2.fc.unesp.br/~papa/pub/datasets/Handpd/)
-and `scripts/split_data.py` document acquisition and the split.
+data is under `data/`.
+
+## Dataset sources and project approach
+
+NeuroTrace uses 736 labelled spiral and meander scans from HandPD. The blue
+pen trace and dark printed guide allow OpenCV to measure properties such as
+trace deviation and fragmentation. The split script uses exam identifiers
+to keep drawings from the same exam together. See the evaluation section
+below for the limits of the exam-grouped split.
+[UNESP HandPD dataset](https://www2.fc.unesp.br/~papa/pub/datasets/Handpd/) ·
+[Split script](scripts/split_data.py)
+
+The local `data/raw/kaggle_drawings/dataset/` reference collection matches
+the layout and counts of K. Scott Mader's *Parkinson's Drawings* listing.
+It contains 204 images, with 72 training and 30 testing images each for
+spirals and waves. The local bundle also includes a notebook, app, and
+saved models. The exact download route is unverified. NeuroTrace's
+documented training and evaluation use the prepared HandPD data.
+[Kaggle Parkinson’s Drawings listing](https://www.kaggle.com/datasets/kmader/parkinsons-drawings) ·
+[Dataset folder in Rohit Dubey’s GitHub repository](https://github.com/rohitdubey03/detect-parkinsons/tree/master/dataset)
+
+Rohit Dubey's reference project reports Random Forest accuracies of 83.33%
+for spirals and 71.33% for waves. NeuroTrace's notebook compares an
+engineered-feature Random Forest with a CNN trained on pen masks. The
+production forest supports serving, monitoring, and versioned retraining.
+The reported accuracies use different datasets and evaluation splits, so
+they cannot establish which model performs better.
+[Dubey's reference project](https://github.com/rohitdubey03/detect-parkinsons) ·
+[NeuroTrace notebook](notebook/neurotrace.ipynb)
+
+### Data folders and split files
+
+| Path | Role |
+| --- | --- |
+| `data/raw/handpd/` | Original HandPD scans and metadata used to prepare the splits. |
+| `data/raw/kaggle_drawings/` | Local reference collection with pre-split spiral and wave images. |
+| `data/train/` | 584 development images. The notebook assigns 344 to fitting, 120 to validation, and 120 to the held-back upload batch. Production v1 uses the 464 fitting and validation images. |
+| `data/retrain_batch/` | Copies of the 120 held-back HandPD drawings used for the v1-to-v2 retraining demo. |
+| `data/test/` | 152 evaluation images from 19 held-out exam groups. |
+| `data/split_manifest.csv` | Records the source path, label, drawing type, exam group, and split for each image. |
+| `data/train_roles.csv` | Records the fitting, validation, or held-back role of each development image. |
 
 ## Where to find things
 
@@ -89,6 +128,11 @@ and `scripts/split_data.py` document acquisition and the split.
 | `models/` | Saved models and active-version registry |
 | `api/` and `dashboard/` | FastAPI endpoints and Streamlit interface |
 | `monitoring/` and `reports/` | Locust workload, benchmark CSVs and figures |
+
+Saved charts include [feature distributions](reports/figures/features.png),
+[Random Forest evaluation](reports/figures/eval_random_forest.png),
+[CNN evaluation](reports/figures/eval_cnn.png), and
+[CNN training and validation loss](reports/figures/cnn_loss.png).
 
 ## How the pipeline works
 
